@@ -23,6 +23,7 @@ const char* TIME_API_URL = "http://f.m.suning.com/api/ct.do";
 #define MIJIA_DELAY_TIME 2400
 // Token更新间隔（1小时 = 3600000毫秒）
 #define TOKEN_UPDATE_INTERVAL 3600000UL
+#define COOKIE_INPUT "";
 
 
 //LED配置
@@ -102,16 +103,93 @@ void saveCookie(String res)
 {
     int p = 0;
 
-    while(true)
+    while (true)
     {
-        p = res.indexOf("Set-Cookie:",p);
-        if(p==-1) break;
+        p = res.indexOf("Set-Cookie:", p);
+        if (p == -1) break;
 
-        p += 11;
+        p += 11; // 跳过 "Set-Cookie:"
 
-        int e = res.indexOf(";",p);
+        // 跳过前导空格
+        while (res.charAt(p) == ' ') p++;
 
-        cookieJar += res.substring(p,e) + ";";
+        // 找到分号位置，提取 name=value
+        int e = res.indexOf(";", p);
+        if (e == -1) e = res.length(); // 如果没有分号，取到字符串末尾
+
+        String newCookie = res.substring(p, e);
+        
+        // 提取变量名（等号前的部分）
+        int eqPos = newCookie.indexOf("=");
+        if (eqPos == -1) {
+            // 没有等号，格式异常，跳过
+            continue;
+        }
+        String newName = newCookie.substring(0, eqPos);
+
+        // 在 cookieJar 中查找是否已存在同名变量
+        bool replaced = false;
+        if (cookieJar.length() > 0) {
+            // 遍历 cookieJar 中所有的 Cookie
+            int searchPos = 0;
+            while (searchPos < cookieJar.length()) {
+                // 找到当前 Cookie 的结束位置（下一个分号+空格）
+                int cookieEnd = cookieJar.indexOf("; ", searchPos);
+                if (cookieEnd == -1) {
+                    cookieEnd = cookieJar.length() - 1; // 最后一个（注意末尾有分号）
+                    if (cookieEnd < 0) cookieEnd = 0;
+                }
+                
+                // 提取当前 Cookie 片段
+                int segmentLen = (cookieEnd == cookieJar.length() - 1 || cookieEnd == 0) 
+                    ? cookieJar.length() - searchPos 
+                    : cookieEnd - searchPos + 2; // 包含 "; "
+                
+                String currentSegment = cookieJar.substring(searchPos, cookieEnd);
+                
+                // 提取当前 Cookie 的变量名
+                int currentEq = currentSegment.indexOf("=");
+                if (currentEq != -1) {
+                    String currentName = currentSegment.substring(0, currentEq);
+                    
+                    // 去掉可能的空格
+                    currentName.trim();
+                    newName.trim();
+                    
+                    if (currentName.equals(newName)) {
+                        // 找到同名，执行替换
+                        // 构造新的 cookieJar：前面部分 + 新 Cookie + 后面部分
+                        String before = cookieJar.substring(0, searchPos);
+                        String after;
+                        if (cookieEnd >= cookieJar.length() - 1) {
+                            after = "";
+                        } else {
+                            after = cookieJar.substring(cookieEnd + 2); // 跳过 "; "
+                        }
+                        
+                        cookieJar = before + newCookie + "; " + after;
+                        replaced = true;
+                        break;
+                    }
+                }
+                
+                // 移动到下一个 Cookie
+                if (cookieEnd >= cookieJar.length() - 1) {
+                    break;
+                }
+                searchPos = cookieEnd + 2; // 跳过 "; "
+            }
+        }
+
+        // 如果没有替换（新变量），追加到末尾
+        if (!replaced) {
+            if (cookieJar.length() > 0) {
+                cookieJar += " ";
+            }
+            cookieJar += newCookie + ";";
+        }
+
+        // 继续查找下一个 Set-Cookie
     }
 }
 
@@ -173,8 +251,7 @@ String httpsPOST(const char* host,String url,String body)
 
 String login()
 {
-    cookieJar="";
-
+    cookieJar=COOKIE_INPUT;
     // STEP1 获取登录页
     String res = httpsGET(
     "sso.dlut.edu.cn",
@@ -255,15 +332,14 @@ String login()
     saveCookie(res);
 
 
-
+    Serial.println(cookieJar);
     // STEP6 token
-    int t = cookieJar.indexOf("token=");
+    int t = cookieJar.indexOf("shfb-token=");
 
     int e = cookieJar.indexOf(";",t);
 
-    return cookieJar.substring(t+6,e);
+    return cookieJar.substring(t+11,e);
 }
-
 
 
 /**
